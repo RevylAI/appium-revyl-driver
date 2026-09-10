@@ -2,8 +2,9 @@
 
 Run a supported subset of native Appium commands against an **existing Revyl
 Android or iOS session**. This driver is not a drop-in replacement for
-UiAutomator2 or XCUITest. The Python smoke sample has been verified against
-synthetic apps on staging Android and iOS devices.
+UiAutomator2 or XCUITest. The Python smoke sample and expanded native-command
+checks have been verified against synthetic apps on staging Android emulators
+and iOS simulators.
 
 ## Install
 
@@ -121,8 +122,10 @@ validates current screen geometry through the authenticated backend.
 Unknown options, command aliases, and `mobile:` commands are rejected rather
 than ignored. The driver never retries an uncertain action; native worker
 transports may still retry internally, so this is not an end-to-end exactly-once
-guarantee. These additions have loopback protocol coverage, not new live-device
-verification.
+guarantee. Staging checks verified native contexts, type and attribute reads,
+descendant-only lookup, tap, native double-tap, long press, and four directional
+swipes on both platforms, plus Android resource IDs. Rejected clear commands left
+the input unchanged, and quitting Appium left both Revyl sessions running.
 
 ## Limits and cleanup
 
