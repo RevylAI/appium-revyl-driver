@@ -1,8 +1,9 @@
 # Revyl Appium driver
 
 Run a supported subset of native Appium commands against an **existing Revyl
-Android or iOS session**. Experimental; not a drop-in replacement for
-UiAutomator2 or XCUITest. Live-device compatibility has not yet been verified.
+Android or iOS session**. This driver is not a drop-in replacement for
+UiAutomator2 or XCUITest. The Python smoke sample has been verified against
+synthetic apps on staging Android and iOS devices.
 
 ## Install
 
@@ -17,7 +18,7 @@ npx --no-install appium driver install --source=local "$PWD"
 
 ## Run
 
-[Prepare a Revyl session](https://docs.revyl.com/cli/device/quickstart) with your
+[Prepare a Revyl session](https://docs.revyl.ai/cli/device/quickstart) with your
 app already installed and running. Provide `REVYL_API_KEY` through the Appium
 server's environment, then start the server:
 

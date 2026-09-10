@@ -1,6 +1,6 @@
 # Revyl Appium driver
 
-This repository owns the standalone, experimental Appium extension. The Revyl
+This repository owns the standalone Appium extension. The Revyl
 backend and device workers are external dependencies, not vendored source.
 
 - Keep the driver attach-only. Deleting an Appium session must never stop,

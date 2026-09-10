@@ -51,6 +51,46 @@ test("iOS traverses nested IDB arrays and keeps fractional point coordinates", (
   assert.equal(elements[1].identifier, "child");
 });
 
+for (const separator of ["", "\n", "\r\n"]) {
+  test(`Android accepts only the known UIAutomator footer after XML (${JSON.stringify(separator)})`, () => {
+    const xml = `<hierarchy>${androidNode('content-desc="name-input"')}</hierarchy>`;
+    const { elements } = parseHierarchy(
+      `${xml}${separator}UI hierchary dumped to: /dev/tty\n`,
+      "Android",
+    );
+    assert.equal(elements[0].identifier, "name-input");
+  });
+}
+
+for (const trailer of [
+  "unknown output",
+  "UI hierchary dumped to: /sdcard/window.xml",
+  "UI hierchary dumped to: /dev/tty\nextra output",
+  "UI hierchary dumped to: /dev/tty\nUI hierchary dumped to: /dev/tty",
+]) {
+  test(`Android rejects unexpected trailing output (${JSON.stringify(trailer)})`, () => {
+    assert.throws(
+      () =>
+        parseHierarchy(
+          `<hierarchy>${androidNode()}</hierarchy>${trailer}`,
+          "Android",
+        ),
+      /invalid native hierarchy/,
+    );
+  });
+}
+
+test("Android still rejects malformed XML before the known footer", () => {
+  assert.throws(
+    () =>
+      parseHierarchy(
+        "<hierarchy><node></hierarchy>UI hierchary dumped to: /dev/tty",
+        "Android",
+      ),
+    /invalid native hierarchy/,
+  );
+});
+
 test("iOS does not substitute a label for a missing accessibility identifier", () => {
   const { elements } = parseHierarchy(
     JSON.stringify([iosNode({ AXUniqueId: null })]),
