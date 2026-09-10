@@ -18,7 +18,7 @@ npx --no-install appium driver install --source=local "$PWD"
 
 ## Run
 
-[Prepare a Revyl session](https://docs.revyl.com/cli/device/quickstart) with your
+[Prepare a Revyl session](https://docs.revyl.ai/cli/device/quickstart) with your
 app already installed and running. Provide `REVYL_API_KEY` through the Appium
 server's environment, then start the server:
 
