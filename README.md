@@ -2,7 +2,8 @@
 
 Run a supported subset of native Appium commands against an **existing Revyl
 Android or iOS session**. Experimental; not a drop-in replacement for
-UiAutomator2 or XCUITest. Live-device compatibility has not yet been verified.
+UiAutomator2 or XCUITest. The Python smoke sample has been verified against
+synthetic apps on staging Android and iOS devices.
 
 ## Install
 
