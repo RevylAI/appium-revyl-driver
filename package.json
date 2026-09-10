@@ -1,0 +1,41 @@
+{
+  "name": "appium-revyl-driver",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Experimental attach-only Appium driver for Revyl native device sessions",
+  "main": "lib/driver.js",
+  "files": [
+    "lib",
+    "examples",
+    "README.md"
+  ],
+  "engines": {
+    "node": "^20.19.0 || ^22.12.0 || >=24.0.0",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 test/*.test.js",
+    "check": "prettier --check . && node --check lib/driver.js && node --check lib/client.js && node --check lib/hierarchy.js"
+  },
+  "appium": {
+    "driverName": "revyl",
+    "automationName": "Revyl",
+    "platformNames": [
+      "Android",
+      "iOS"
+    ],
+    "mainClass": "RevylDriver"
+  },
+  "peerDependencies": {
+    "appium": "^3.6.0"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^5.5.1",
+    "pngjs": "^7.0.0"
+  },
+  "devDependencies": {
+    "appium": "3.6.0",
+    "prettier": "^3.8.1",
+    "webdriverio": "^9.24.0"
+  }
+}
