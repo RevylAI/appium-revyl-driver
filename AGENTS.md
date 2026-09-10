@@ -11,7 +11,8 @@ backend and device workers are external dependencies, not vendored source.
 - Preserve explicit unsupported-operation errors and snapshot-scoped element
   references. Do not simulate success or silently rebind stale elements.
 - Keep dependencies in the package manifest and regenerate the npm lockfile
-  with npm. Use the validation commands documented in `README.md`.
+  with npm. Validate changes with `npm test`, `npm run check`, and
+  `npm pack --dry-run`.
 - Protocol tests must load the extension through real Appium and use real
   clients, with all Revyl traffic restricted to loopback mocks. A passing mock
   suite is not proof of real-device compatibility.
