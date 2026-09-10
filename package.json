@@ -2,7 +2,7 @@
   "name": "appium-revyl-driver",
   "version": "0.1.0",
   "private": true,
-  "description": "Experimental attach-only Appium driver for Revyl native device sessions",
+  "description": "Attach-only Appium driver for Revyl native device sessions",
   "main": "lib/driver.js",
   "files": [
     "lib",
