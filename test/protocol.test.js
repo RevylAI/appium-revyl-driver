@@ -37,8 +37,8 @@ const ANDROID_HIERARCHY = `<?xml version="1.0" encoding="UTF-8"?>
 <hierarchy rotation="0">
   <node content-desc="root" text="" class="android.widget.FrameLayout" enabled="true" bounds="[0,0][1080,1920]">
     <node content-desc="container" text="" class="android.view.ViewGroup" enabled="true" bounds="[0,0][1080,600]">
-      <node content-desc="save" text="Save changes" class="android.widget.Button" enabled="true" bounds="[20,40][220,120]" />
-      <node content-desc="name" text="Existing name" class="android.widget.EditText" enabled="true" bounds="[30,140][330,200]" />
+      <node content-desc="save" resource-id="com.example.native:id/save" text="Save changes" class="android.widget.Button" enabled="true" clickable="true" bounds="[20,40][220,120]" />
+      <node content-desc="name" resource-id="com.example.native:id/name" text="Existing name" class="android.widget.EditText" enabled="true" focused="false" bounds="[30,140][330,200]" />
       <node content-desc="disabled" text="Unavailable" class="android.widget.Button" enabled="false" bounds="[20,240][220,320]" />
       <node content-desc="empty" text="Hidden" class="android.widget.Button" enabled="true" bounds="[0,0][0,0]" />
     </node>
@@ -204,6 +204,20 @@ describe(
                 response.end(state.hierarchy);
                 return;
               }
+              if (request.method === "GET" && action === "health") {
+                const health = state.health ?? {
+                  status: "ok",
+                  workflow_run_id: WORKFLOW_ID,
+                  platform: state.detail.platform,
+                  device_connected: true,
+                  screen_width: state.detail.platform === "ios" ? 390 : 1080,
+                  screen_height: state.detail.platform === "ios" ? 844 : 1920,
+                };
+                response.end(
+                  typeof health === "string" ? health : JSON.stringify(health),
+                );
+                return;
+              }
               if (request.method === "GET" && action === "screenshot") {
                 response.setHeader("Content-Type", "image/png");
                 response.end(state.screenshot);
@@ -211,7 +225,14 @@ describe(
               }
               if (
                 request.method === "POST" &&
-                ["tap", "input", "launch"].includes(action)
+                [
+                  "tap",
+                  "input",
+                  "launch",
+                  "double_tap",
+                  "longpress",
+                  "swipe",
+                ].includes(action)
               ) {
                 if (state.timeoutAction === action) return;
                 response.statusCode = state.actionStatus;
@@ -219,7 +240,7 @@ describe(
                   JSON.stringify(
                     state.actionResult ?? {
                       success: true,
-                      action,
+                      action: action === "longpress" ? "long_press" : action,
                       latency_ms: 1,
                       error: null,
                     },
@@ -538,6 +559,608 @@ describe(
       });
     }
 
+    async function createPlatformBrowser(platform) {
+      state.detail.platform = platform.toLowerCase();
+      state.hierarchy = platform === "iOS" ? IOS_HIERARCHY : ANDROID_HIERARCHY;
+      return createBrowser(capabilities(platform));
+    }
+
+    for (const platform of ["Android", "iOS"]) {
+      it(`${platform}: exposes native contexts without changing the remote device or expiring handles`, async () => {
+        const browser = await createPlatformBrowser(platform);
+        const save = await browser.$("~save");
+        const requestCount = state.requests.length;
+        assert.deepEqual(await browser.getAppiumContexts(), ["NATIVE_APP"]);
+        assert.equal(await browser.getAppiumContext(), "NATIVE_APP");
+        await browser.switchAppiumContext("NATIVE_APP");
+        assert.equal(state.requests.length, requestCount);
+        for (const context of [
+          "WEBVIEW_com.example.native",
+          "CHROMIUM",
+          "native_app",
+          "",
+        ]) {
+          await rejectsWithoutSecrets(
+            () => browser.switchAppiumContext(context),
+            /unsupported|only NATIVE_APP/i,
+          );
+        }
+        assert.equal(await browser.getAppiumContext(), "NATIVE_APP");
+        assert.equal(
+          await browser.getElementText(save.elementId),
+          "Save changes",
+        );
+        assert.deepEqual(mutations(), []);
+      });
+
+      it(`${platform}: exact native type lookup and allowlisted attributes preserve raw semantics`, async () => {
+        const browser = await createPlatformBrowser(platform);
+        const name = await browser.findElement(
+          "class name",
+          platform === "Android" ? "android.widget.EditText" : "TextField",
+        );
+        assert.equal(
+          await browser.getElementText(name[ELEMENT_KEY]),
+          "Existing name",
+        );
+        assert.equal(
+          await browser.getElementAttribute(name[ELEMENT_KEY], "enabled"),
+          "true",
+        );
+        if (platform === "Android") {
+          assert.equal(
+            await browser.getElementAttribute(name[ELEMENT_KEY], "resource-id"),
+            "com.example.native:id/name",
+          );
+          assert.equal(
+            await browser.getElementAttribute(
+              name[ELEMENT_KEY],
+              "content-desc",
+            ),
+            "name",
+          );
+          assert.equal(
+            await browser.getElementAttribute(name[ELEMENT_KEY], "focused"),
+            "false",
+          );
+          assert.equal(
+            await browser.getElementAttribute(name[ELEMENT_KEY], "selected"),
+            null,
+          );
+          const byId = await browser.findElement(
+            "id",
+            "com.example.native:id/name",
+          );
+          assert.equal(
+            await browser.getElementText(byId[ELEMENT_KEY]),
+            "Existing name",
+          );
+          assert.deepEqual(await browser.findElements("id", "name"), []);
+        } else {
+          assert.equal(
+            await browser.getElementAttribute(name[ELEMENT_KEY], "AXUniqueId"),
+            "name",
+          );
+          assert.equal(
+            await browser.getElementAttribute(name[ELEMENT_KEY], "AXLabel"),
+            "Name label",
+          );
+          assert.equal(
+            await browser.getElementAttribute(name[ELEMENT_KEY], "AXValue"),
+            "Existing name",
+          );
+          const save = await browser.$("~save");
+          assert.equal(
+            await browser.getElementAttribute(save.elementId, "AXValue"),
+            null,
+          );
+          assert.deepEqual(
+            await browser.findElements(
+              "class name",
+              "XCUIElementTypeTextField",
+            ),
+            [],
+          );
+          await rejectsWithoutSecrets(
+            () => browser.findElements("id", "name"),
+            /Android-only|invalid selector/i,
+          );
+        }
+        for (const attribute of [
+          "displayed",
+          "private-property",
+          "__proto__",
+          "constructor",
+          "toString",
+        ])
+          await rejectsWithoutSecrets(
+            () => browser.getElementAttribute(name[ELEMENT_KEY], attribute),
+            /not supported|unsupported/i,
+          );
+        assert.deepEqual(mutations(), []);
+      });
+
+      it(`${platform}: scoped searches include descendants, exclude self and outside duplicates, and return independent handles`, async () => {
+        const browser = await createPlatformBrowser(platform);
+        if (platform === "Android") {
+          state.hierarchy = state.hierarchy.replace(
+            "</hierarchy>",
+            '<node content-desc="save" text="Outside" class="android.widget.Button" enabled="true" bounds="[400,40][600,120]" /></hierarchy>',
+          );
+        } else {
+          const roots = JSON.parse(state.hierarchy);
+          roots.push({
+            AXUniqueId: "save",
+            AXLabel: "Outside",
+            type: "Button",
+            enabled: true,
+            frame: { x: 0, y: 500, width: 100, height: 40 },
+          });
+          state.hierarchy = JSON.stringify(roots);
+        }
+        const all = await browser.findElements("accessibility id", "save");
+        assert.equal(all.length, 2);
+        assert.equal(
+          await browser.getElementText(all[0][ELEMENT_KEY]),
+          "Save changes",
+        );
+        assert.equal(
+          await browser.getElementText(all[1][ELEMENT_KEY]),
+          "Outside",
+        );
+        const root = await browser.$("~root");
+        const container = await browser.$("~container");
+        const inside = await browser.findElementsFromElement(
+          root.elementId,
+          "accessibility id",
+          "save",
+        );
+        assert.equal(inside.length, 1);
+        assert.notEqual(inside[0][ELEMENT_KEY], all[0][ELEMENT_KEY]);
+        assert.equal(
+          await browser.getElementText(inside[0][ELEMENT_KEY]),
+          "Save changes",
+        );
+        assert.deepEqual(
+          await browser.findElementsFromElement(
+            container.elementId,
+            "accessibility id",
+            "container",
+          ),
+          [],
+        );
+        assert.deepEqual(
+          await browser.findElementsFromElement(
+            inside[0][ELEMENT_KEY],
+            "accessibility id",
+            "save",
+          ),
+          [],
+        );
+        const field = await browser.findElementFromElement(
+          container.elementId,
+          "class name",
+          platform === "Android" ? "android.widget.EditText" : "TextField",
+        );
+        assert.equal(
+          await browser.getElementText(field[ELEMENT_KEY]),
+          "Existing name",
+        );
+        if (platform === "Android") {
+          const byId = await browser.findElementFromElement(
+            root.elementId,
+            "id",
+            "com.example.native:id/name",
+          );
+          assert.equal(
+            await browser.getElementText(byId[ELEMENT_KEY]),
+            "Existing name",
+          );
+        }
+        state.hierarchy += "\n";
+        await rejectsWithoutSecrets(
+          () =>
+            browser.findElementsFromElement(
+              root.elementId,
+              "accessibility id",
+              "save",
+            ),
+          /stale element reference/i,
+        );
+        await rejectsWithoutSecrets(
+          () => browser.getElementAttribute(all[0][ELEMENT_KEY], "enabled"),
+          /stale element reference/i,
+        );
+        assert.deepEqual(mutations(), []);
+      });
+
+      it(`${platform}: clear never mutates even a uniquely identified editable field`, async () => {
+        const browser = await createPlatformBrowser(platform);
+        const name = await browser.$("~name");
+        const requestCount = state.requests.length;
+        await rejectsWithoutSecrets(
+          () => browser.elementClear(name.elementId),
+          /clear requires a worker contract|unsupported/i,
+        );
+        assert.equal(state.requests.length, requestCount);
+        assert.equal(
+          await browser.getElementText(name.elementId),
+          "Existing name",
+        );
+        assert.deepEqual(mutations(), []);
+      });
+
+      it(`${platform}: named native gestures use exact worker endpoints, units, defaults, and attribution`, async () => {
+        const browser = await createPlatformBrowser(platform);
+        const commands = [];
+        browser.on("command", (command) => commands.push(command));
+        await browser.execute("revyl:tap", { x: 20, y: 30 });
+        await browser.executeScript("revyl:doubleTap", [{ x: 21, y: 31 }]);
+        await browser.executeScript("revyl:longPress", [{ x: 22, y: 32 }]);
+        await browser.executeScript("revyl:longPress", [
+          { x: 22, y: 32, durationMs: 2345 },
+        ]);
+        await browser.executeScript("revyl:swipe", [
+          { x: 100, y: 200, direction: "up" },
+        ]);
+        for (const direction of ["down", "left", "right"])
+          await browser.executeScript("revyl:swipe", [
+            { x: 100, y: 200, direction, durationMs: 456 },
+          ]);
+        assert.deepEqual(
+          mutations().map(({ path, body }) => ({
+            action: path.split("/").at(-1),
+            body,
+          })),
+          [
+            { action: "tap", body: { x: 20, y: 30 } },
+            { action: "double_tap", body: { x: 21, y: 31 } },
+            { action: "longpress", body: { x: 22, y: 32, duration_ms: 1500 } },
+            { action: "longpress", body: { x: 22, y: 32, duration_ms: 2345 } },
+            {
+              action: "swipe",
+              body: { x: 100, y: 200, duration_ms: 500, direction: "up" },
+            },
+            ...["down", "left", "right"].map((direction) => ({
+              action: "swipe",
+              body: { x: 100, y: 200, duration_ms: 456, direction },
+            })),
+          ],
+        );
+        for (const request of mutations()) {
+          assert.equal(request.headers["x-revyl-agent"], "Appium");
+          assert.equal(
+            request.headers["x-revyl-agent-session-id"],
+            browser.sessionId,
+          );
+        }
+        assert.ok(
+          commands.filter(({ endpoint }) => endpoint.endsWith("/execute/sync"))
+            .length === 8,
+        );
+        const requestCount = state.requests.length;
+        await browser.deleteSession();
+        clients.delete(browser);
+        assert.equal(state.requests.length, requestCount);
+      });
+    }
+
+    it("scoped implicit waits fail stale instead of rebinding the parent after a hierarchy change", async () => {
+      const browser = await createBrowser();
+      const container = await browser.$("~container");
+      await browser.setTimeout({ implicit: 1000 });
+      const timer = setTimeout(() => {
+        state.hierarchy += "\n";
+      }, 30);
+      try {
+        await rejectsWithoutSecrets(
+          () =>
+            browser.findElementsFromElement(
+              container.elementId,
+              "accessibility id",
+              "missing",
+            ),
+          /stale element reference/i,
+        );
+      } finally {
+        clearTimeout(timer);
+      }
+      assert.deepEqual(mutations(), []);
+    });
+
+    it("rejects unknown scope handles and oversized selectors without device mutations", async () => {
+      const browser = await createBrowser();
+      await rejectsWithoutSecrets(
+        () =>
+          browser.findElementsFromElement(
+            "not-a-handle",
+            "accessibility id",
+            "save",
+          ),
+        /stale element reference/i,
+      );
+      for (const strategy of ["accessibility id", "id", "class name"]) {
+        for (const selector of ["", "x".repeat(1025)])
+          await rejectsWithoutSecrets(
+            () => browser.findElements(strategy, selector),
+            /invalid selector|1–1024/i,
+          );
+      }
+      assert.deepEqual(mutations(), []);
+    });
+
+    it("rejects JavaScript, mobile aliases, future features, and arbitrary worker endpoints before contacting Revyl", async () => {
+      const browser = await createBrowser();
+      const requestCount = state.requests.length;
+      for (const script of [
+        "mobile: clickGesture",
+        "mobile: tap",
+        "revyl:drag",
+        "revyl:pinch",
+        "revyl:clear",
+        "revyl:installApp",
+        "revyl:reset",
+        "revyl:tap/../../install",
+        "revyl: tap",
+        "return document.title",
+        "constructor",
+        "__proto__",
+        "toString",
+      ])
+        await rejectsWithoutSecrets(
+          () => browser.executeScript(script, [{ x: 20, y: 30 }]),
+          /unsupported|supported/i,
+        );
+      await rejectsWithoutSecrets(
+        () => browser.installApp("/not-a-real-app.apk"),
+        /unsupported|not.*implemented/i,
+      );
+      await rejectsWithoutSecrets(
+        () => browser.releaseActions(),
+        /unsupported|not.*implemented/i,
+      );
+      assert.equal(state.requests.length, requestCount);
+      assert.deepEqual(mutations(), []);
+    });
+
+    const malformedGestures = [
+      ["missing options", "revyl:tap", []],
+      ["multiple options", "revyl:tap", [{ x: 20, y: 30 }, {}]],
+      ["null options", "revyl:tap", [null]],
+      ["array options", "revyl:tap", [[20, 30]]],
+      ["missing coordinates", "revyl:tap", [{}]],
+      ["string coordinate", "revyl:tap", [{ x: "20", y: 30 }]],
+      ["fractional coordinate", "revyl:tap", [{ x: 20.5, y: 30 }]],
+      ["negative coordinate", "revyl:tap", [{ x: -1, y: 30 }]],
+      ["oversized coordinate", "revyl:tap", [{ x: 32768, y: 30 }]],
+      [
+        "unknown parameter",
+        "revyl:tap",
+        [{ x: 20, y: 30, elementId: "unknown" }],
+      ],
+      [
+        "client credential",
+        "revyl:tap",
+        [{ x: 20, y: 30, apiKey: "fake-client-key" }],
+      ],
+      ["ignored tap duration", "revyl:tap", [{ x: 20, y: 30, durationMs: 10 }]],
+      [
+        "ignored double tap interval",
+        "revyl:doubleTap",
+        [{ x: 20, y: 30, intervalMs: 10 }],
+      ],
+      ["zero duration", "revyl:longPress", [{ x: 20, y: 30, durationMs: 0 }]],
+      [
+        "unbounded duration",
+        "revyl:longPress",
+        [{ x: 20, y: 30, durationMs: 10001 }],
+      ],
+      [
+        "string duration",
+        "revyl:longPress",
+        [{ x: 20, y: 30, durationMs: "100" }],
+      ],
+      [
+        "null duration",
+        "revyl:longPress",
+        [{ x: 20, y: 30, durationMs: null }],
+      ],
+      [
+        "fractional duration",
+        "revyl:swipe",
+        [{ x: 20, y: 30, direction: "up", durationMs: 0.5 }],
+      ],
+      ["missing direction", "revyl:swipe", [{ x: 20, y: 30 }]],
+      [
+        "ambiguous direction",
+        "revyl:swipe",
+        [{ x: 20, y: 30, direction: "UP" }],
+      ],
+      [
+        "ignored distance",
+        "revyl:swipe",
+        [{ x: 20, y: 30, direction: "up", percent: 0.5 }],
+      ],
+    ];
+    for (const [name, script, args] of malformedGestures) {
+      it(`rejects ${name} before any gesture request`, async () => {
+        const browser = await createBrowser();
+        const requestCount = state.requests.length;
+        await rejectsWithoutSecrets(
+          () => browser.executeScript(script, args),
+          /invalid argument|requires|must|options/i,
+        );
+        assert.equal(state.requests.length, requestCount);
+        assert.deepEqual(mutations(), []);
+      });
+    }
+
+    it("rejects off-screen native element centers and gestures, rather than clamping or tapping", async () => {
+      const browser = await createBrowser();
+      for (const coordinates of [
+        { x: 1080, y: 20 },
+        { x: 20, y: 1920 },
+      ])
+        await rejectsWithoutSecrets(
+          () => browser.executeScript("revyl:tap", [coordinates]),
+          /inside the native screen/i,
+        );
+      for (const options of [
+        { x: 0, y: 10, direction: "left" },
+        { x: 10, y: 0, direction: "up" },
+        { x: 1079, y: 10, direction: "right" },
+        { x: 10, y: 1919, direction: "down" },
+      ])
+        await rejectsWithoutSecrets(
+          () => browser.executeScript("revyl:swipe", [options]),
+          /no usable travel/i,
+        );
+      state.hierarchy = state.hierarchy.replace(
+        "[20,40][220,120]",
+        "[2000,40][2200,120]",
+      );
+      const save = await browser.$("~save");
+      await rejectsWithoutSecrets(
+        () => browser.elementClick(save.elementId),
+        /outside the screen/i,
+      );
+      assert.deepEqual(mutations(), []);
+    });
+
+    for (const invalidHealth of [
+      "not-json",
+      "null",
+      {},
+      {
+        status: "ok",
+        device_connected: true,
+        workflow_run_id: WORKFLOW_ID,
+        platform: "android",
+        screen_width: "1080",
+        screen_height: 1920,
+      },
+      {
+        status: "ok",
+        device_connected: true,
+        workflow_run_id: SESSION_ID,
+        platform: "android",
+        screen_width: 1080,
+        screen_height: 1920,
+      },
+      {
+        status: "ok",
+        device_connected: true,
+        workflow_run_id: WORKFLOW_ID,
+        platform: "ios",
+        screen_width: 390,
+        screen_height: 844,
+      },
+    ]) {
+      it(`rejects untrusted geometry ${JSON.stringify(invalidHealth)}`, async () => {
+        const browser = await createBrowser();
+        state.health = invalidHealth;
+        await rejectsWithoutSecrets(
+          () => browser.executeScript("revyl:tap", [{ x: 20, y: 30 }]),
+          /invalid device geometry/i,
+        );
+        assert.deepEqual(mutations(), []);
+      });
+    }
+
+    for (const [script, action, options] of [
+      ["revyl:tap", "tap", { x: 20, y: 30 }],
+      ["revyl:doubleTap", "double_tap", { x: 20, y: 30 }],
+      ["revyl:longPress", "longpress", { x: 20, y: 30 }],
+      ["revyl:swipe", "swipe", { x: 20, y: 30, direction: "down" }],
+    ]) {
+      for (const outcome of [
+        "success",
+        "timeout",
+        "failure",
+        "wrong action",
+        "access denied",
+      ]) {
+        it(`${script}: ${outcome} invalidates handles without replay`, async () => {
+          const browser = await createBrowser();
+          const save = await browser.$("~save");
+          const root = await browser.$("~root");
+          if (outcome === "timeout") state.timeoutAction = action;
+          if (outcome === "failure")
+            state.actionResult = {
+              success: false,
+              action,
+              error: `${FAKE_API_KEY}: provider-private-detail`,
+            };
+          if (outcome === "wrong action")
+            state.actionResult = {
+              success: true,
+              action: action === "longpress" ? "longpress" : "install",
+              error: null,
+            };
+          if (outcome === "access denied") state.actionStatus = 403;
+          const command = () => browser.executeScript(script, [options]);
+          if (outcome === "success") await command();
+          else
+            await rejectsWithoutSecrets(
+              command,
+              /timed out|timeout|did not confirm success|denied access/i,
+            );
+          assert.equal(mutations().length, 1);
+          await rejectsWithoutSecrets(
+            () => browser.elementClick(save.elementId),
+            /stale element reference/i,
+          );
+          await rejectsWithoutSecrets(
+            () =>
+              browser.findElementsFromElement(
+                root.elementId,
+                "accessibility id",
+                "save",
+              ),
+            /stale element reference/i,
+          );
+          assert.equal(mutations().length, 1);
+          if (outcome !== "access denied")
+            assert.equal(
+              await (await browser.$("~save")).getText(),
+              "Save changes",
+            );
+        });
+      }
+    }
+
+    it("rejects malformed Unicode, control characters, special keys, and oversized input before contacting Revyl", async () => {
+      const browser = await createBrowser();
+      const name = await browser.$("~name");
+      const requestCount = state.requests.length;
+      for (const text of [
+        "\uD800",
+        "\uDC00",
+        "\u0000",
+        "\n",
+        "\t",
+        "\u007F",
+        "\u0085",
+        "\uE007",
+        "x".repeat(10001),
+      ])
+        await rejectsWithoutSecrets(
+          () => browser.elementSendKeys(name.elementId, text),
+          /invalid argument|text characters|special keys/i,
+        );
+      assert.equal(state.requests.length, requestCount);
+      assert.deepEqual(mutations(), []);
+      await browser.elementSendKeys(name.elementId, "");
+      assert.deepEqual(mutations(), []);
+      await browser.elementSendKeys(
+        name.elementId,
+        "Español Ελληνικά 日本語 🦫",
+      );
+      assert.equal(mutations().length, 1);
+      assert.equal(mutations()[0].body.text, "Español Ελληνικά 日本語 🦫");
+      assert.equal(mutations()[0].body.clear_first, false);
+    });
+
     const badCapabilities = [
       [
         "missing session ID",
@@ -673,7 +1296,7 @@ describe(
       assert.deepEqual(mutations(), []);
     });
 
-    it("rejects XPath, element-scoped searches, W3C actions, execute, and webview switching explicitly", async () => {
+    it("rejects XPath, element-scoped XPath, W3C actions, arbitrary execute, and webview switching explicitly", async () => {
       const browser = await createBrowser();
       const element = await browser.$("~save");
       const unsupported =
@@ -684,11 +1307,7 @@ describe(
       );
       await rejectsWithoutSecrets(
         () =>
-          browser.findElementFromElement(
-            element.elementId,
-            "accessibility id",
-            "save",
-          ),
+          browser.findElementFromElement(element.elementId, "xpath", ".//*"),
         unsupported,
       );
       await rejectsWithoutSecrets(

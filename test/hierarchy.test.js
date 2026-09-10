@@ -26,6 +26,26 @@ test("Android decodes XML entities and keeps pixel coordinates and exact IDs", (
       editable: true,
       enabled: true,
       rect: { x: 10, y: 20, width: 100, height: 40 },
+      index: 0,
+      subtreeEnd: 1,
+      attributes: {
+        "content-desc": "Read & write",
+        "resource-id": null,
+        class: "android.widget.EditText",
+        package: null,
+        text: "Revyl",
+        bounds: "[10,20][110,60]",
+        enabled: "true",
+        checked: null,
+        checkable: null,
+        clickable: null,
+        focusable: null,
+        focused: null,
+        scrollable: null,
+        "long-clickable": null,
+        password: null,
+        selected: null,
+      },
     },
   ]);
 });
@@ -97,6 +117,62 @@ test("iOS does not substitute a label for a missing accessibility identifier", (
     "iOS",
   );
   assert.equal(elements[0].identifier, "");
+  assert.equal(elements[0].attributes.AXUniqueId, null);
+});
+
+test("native snapshots freeze references, attributes, and descendant boundaries", () => {
+  const snapshot = parseHierarchy(
+    JSON.stringify([
+      iosNode({ children: [iosNode({ children: [iosNode()] }), iosNode()] }),
+      iosNode(),
+    ]),
+    "iOS",
+  );
+  assert.deepEqual(
+    snapshot.elements.map(({ index, subtreeEnd }) => [index, subtreeEnd]),
+    [
+      [0, 4],
+      [1, 3],
+      [2, 3],
+      [3, 4],
+      [4, 5],
+    ],
+  );
+  assert.ok(Object.isFrozen(snapshot));
+  assert.ok(Object.isFrozen(snapshot.elements));
+  for (const element of snapshot.elements) {
+    assert.ok(Object.isFrozen(element));
+    assert.ok(Object.isFrozen(element.rect));
+    assert.ok(Object.isFrozen(element.attributes));
+  }
+});
+
+test("native attributes preserve absent versus empty values without inventing displayedness", () => {
+  const snapshot = parseHierarchy(
+    JSON.stringify([iosNode({ AXValue: "" }), iosNode({ AXValue: undefined })]),
+    "iOS",
+  );
+  assert.equal(snapshot.elements[0].attributes.AXValue, "");
+  assert.equal(snapshot.elements[1].attributes.AXValue, null);
+  assert.equal(
+    Object.hasOwn(snapshot.elements[0].attributes, "displayed"),
+    false,
+  );
+});
+
+test("Android keeps resource IDs and native state without boolean or name coercion", () => {
+  const snapshot = parseHierarchy(
+    `<hierarchy>${androidNode('content-desc="" resource-id="com.example:id/value" focused="false" password="true" selected="true" text=""')}</hierarchy>`,
+    "Android",
+  );
+  assert.equal(snapshot.elements[0].identifier, "");
+  assert.equal(
+    snapshot.elements[0].attributes["resource-id"],
+    "com.example:id/value",
+  );
+  assert.equal(snapshot.elements[0].attributes.focused, "false");
+  assert.equal(snapshot.elements[0].attributes.password, "true");
+  assert.equal(snapshot.elements[0].attributes.selected, "true");
 });
 
 test("fingerprints change when an element moves or its value changes", () => {
@@ -161,6 +237,18 @@ for (const [name, source, platform] of [
     JSON.stringify([iosNode({ enabled: "true" })]),
     "iOS",
   ],
+  [
+    "invalid Android selected",
+    `<hierarchy>${androidNode('selected="unknown"')}</hierarchy>`,
+    "Android",
+  ],
+  [
+    "invalid Android focused",
+    `<hierarchy>${androidNode('focused="1"')}</hierarchy>`,
+    "Android",
+  ],
+  ["object iOS native type", JSON.stringify([iosNode({ type: {} })]), "iOS"],
+  ["numeric iOS label", JSON.stringify([iosNode({ AXLabel: 1 })]), "iOS"],
 ]) {
   test(`rejects ${name} without returning hierarchy content`, () => {
     assert.throws(() => parseHierarchy(source, platform), {
